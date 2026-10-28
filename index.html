@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>셀리나 입출고 및 재고 관리 시스템</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet">
+  <style>
+    body { font-family: 'Pretendard', sans-serif; }
+    .excel-th { background-color: #fde68a; border: 1px solid #9ca3af; padding: 6px 8px; font-weight: 700; color: #1f2937; text-align: center; white-space: nowrap; }
+    .excel-td { border: 1px solid #d1d5db; padding: 5px 8px; color: #111827; }
+    .excel-td:focus-within { outline: 2px solid #2563eb; background-color: #eff6ff; }
+    .cell-input { width: 100%; background: transparent; outline: none; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-track { background: #f8fafc; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 flex flex-col h-screen overflow-hidden">
+
+  <!-- 상단 네비게이션 바 (GNB) -->
+  <header class="bg-[#2c6e58] text-white px-6 py-3 flex flex-wrap items-center justify-between shadow-md flex-shrink-0 z-20">
+    <div class="flex items-center gap-6">
+      <div class="text-lg font-extrabold tracking-tight flex items-center gap-2">
+        <span class="bg-white text-[#2c6e58] px-2 py-0.5 rounded text-sm font-black">CELLINA</span>
+        <span>통합 입출고·재고 관리</span>
+      </div>
+      <nav class="flex items-center gap-1 text-sm font-semibold">
+        <button onclick="switchTab('order')" id="tab_order" class="px-4 py-2 rounded-md bg-[#52b793] text-white shadow-sm transition">📦 발주/입고관리</button>
+        <button onclick="switchTab('product')" id="tab_product" class="px-4 py-2 rounded-md hover:bg-[#388269] text-gray-100 transition">🏷️ 제품 재고 관리 (37종)</button>
+        <button onclick="switchTab('material')" id="tab_material" class="px-4 py-2 rounded-md hover:bg-[#388269] text-gray-100 transition">📊 원료·부자재 수불부 (185종)</button>
+        <button onclick="switchTab('produce')" id="tab_produce" class="px-4 py-2 rounded-md hover:bg-[#388269] text-gray-100 transition">📝 생산 일지</button>
+      </nav>
+    </div>
+
+    <div class="flex items-center gap-3 text-xs">
+      <span id="syncStatusBadge" onclick="openSheetSyncModal()" class="bg-emerald-800/80 border border-emerald-400/50 px-3 py-1.5 rounded-full cursor-pointer hover:bg-emerald-700 flex items-center gap-1.5 font-medium">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        ☁️ 구글 시트 연결됨
+      </span>
+      <button onclick="saveAllToGoogleSheet()" class="bg-amber-400 hover:bg-amber-300 text-gray-900 font-bold px-3 py-1.5 rounded shadow-sm transition">
+        ⬆️ 현재 데이터 구글 시트에 전체 저장
+      </button>
+      <button onclick="loadAllFromGoogleSheet()" class="bg-white/15 hover:bg-white/25 text-white font-semibold px-3 py-1.5 rounded transition">
+        ⬇️ 시트에서 불러오기
+      </button>
+      <span class="text-white/60">|</span>
+      <span class="font-semibold">👤 셀리나 님</span>
+    </div>
+  </header>
+
+  <!-- 메인 컨텐츠 영역 -->
+  <main class="flex-1 overflow-hidden flex flex-col p-5">
+
+    <!-- 1. 발주/입고관리 탭 -->
+    <section id="view_order" class="flex-1 flex flex-col overflow-hidden bg-white border border-gray-200 rounded-lg shadow-sm">
+      <div class="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 bg-gray-50">
+        <div>
+          <h1 class="text-xl font-bold text-gray-900">2026 발주-입고 내역 (발주/입고관리)</h1>
+          <p class="text-xs text-gray-500 mt-0.5">표의 셀을 클릭하면 엑셀처럼 바로 수정되며, 신규 입고분은 [원료·부자재 수불부] 재고에 자동 합산됩니다.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <input type="text" id="orderSearchItem" oninput="renderOrderTable()" placeholder="품목명 검색..." class="border border-gray-300 rounded px-3 py-1.5 text-sm w-44 bg-white">
+          <input type="text" id="orderSearchVendor" oninput="renderOrderTable()" placeholder="거래처 검색..." class="border border-gray-300 rounded px-3 py-1.5 text-sm w-40 bg-white">
+          <button onclick="resetOrderFilter()" class="border border-gray-300 bg-white hover:bg-gray-100 px-3 py-1.5 rounded text-xs font-semibold">검색 초기화</button>
+          <button onclick="addBlankOrderRow()" class="bg-[#2c6e58] hover:bg-[#225745] text-white font-semibold px-3.5 py-1.5 rounded text-sm shadow-sm">+ 빈 줄 바로 추가</button>
+          <button onclick="openOrderModal()" class="border border-blue-600 text-blue-600 hover:bg-blue-50 font-semibold px-3.5 py-1.5 rounded text-sm">상세 팝업 등록</button>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-auto p-4">
+        <table class="w-full text-xs border-collapse">
+          <thead class="sticky top-0 z-10">
+            <tr>
+              <th class="excel-th w-24">발주일</th>
+              <th class="excel-th min-w-[180px]">품목</th>
+              <th class="excel-th w-24">원산지</th>
+              <th class="excel-th w-28">소비기한</th>
+              <th class="excel-th w-16">단위</th>
+              <th class="excel-th w-20">수량</th>
+              <th class="excel-th w-24">단가(부전)</th>
+              <th class="excel-th w-28">공급가</th>
+              <th class="excel-th w-24">세액</th>
+              <th class="excel-th w-28">합계</th>
+              <th class="excel-th w-32">거래처</th>
+              <th class="excel-th w-24">입고일</th>
+              <th class="excel-th w-16">성적서</th>
+              <th class="excel-th w-24">세금계산서</th>
+              <th class="excel-th w-24">입금일</th>
+              <th class="excel-th w-14">삭제</th>
+            </tr>
+          </thead>
+          <tbody id="orderTableBody"></tbody>
+          <tfoot id="orderTableFoot" class="sticky bottom-0 bg-amber-50 font-bold border-t-2 border-gray-400 text-xs"></tfoot>
+        </table>
+      </div>
+    </section>
+
+    <!-- 2. 제품 재고 관리 탭 -->
+    <section id="view_product" class="flex-1 hidden flex-col overflow-hidden bg-white border border-gray-200 rounded-lg shadow-sm">
+      <div class="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 bg-gray-50">
+        <div>
+          <h1 class="text-xl font-bold text-gray-900">제품 재고 관리 (2026-10-28 기준 기초재고 반영)</h1>
+          <p class="text-xs text-gray-500 mt-0.5">생산일지 완료 시 생산량이 자동 합산(+)되며, 출고 수량 입력 시 현재고가 실시간 차감(-)됩니다.</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+          <div class="bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded text-xs font-bold text-emerald-900">
+            총 제품 재고금액: <span id="totalProductValue" class="text-sm text-emerald-700">0</span>원
+          </div>
+          <select id="prodCatFilter" onchange="renderProductTable()" class="border border-gray-300 rounded px-2.5 py-1.5 text-sm bg-white">
+            <option value="ALL">전체 구분 (37종)</option>
+            <option value="일반식품">일반식품 (14종)</option>
+            <option value="건강기능식품">건강기능식품 (21종)</option>
+            <option value="기타">기타 (2종)</option>
+          </select>
+          <input type="text" id="prodSearch" oninput="renderProductTable()" placeholder="제품명 검색..." class="border border-gray-300 rounded px-3 py-1.5 text-sm w-48 bg-white">
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-auto p-4">
+        <table class="w-full text-xs border-collapse">
+          <thead class="sticky top-0 z-10">
+            <tr>
+              <th class="excel-th w-28">구분</th>
+              <th class="excel-th min-w-[220px]">제품명</th>
+              <th class="excel-th w-24">기초재고</th>
+              <th class="excel-th w-24 bg-blue-100">생산입고(+)</th>
+              <th class="excel-th w-24 bg-rose-100">출고수량(-)</th>
+              <th class="excel-th w-28 bg-emerald-200">현재고</th>
+              <th class="excel-th w-24">단가</th>
+              <th class="excel-th w-32">재고금액</th>
+              <th class="excel-th w-28">제조사</th>
+              <th class="excel-th min-w-[180px]">비고 (소비기한/상태)</th>
+              <th class="excel-th w-28">출고 입력</th>
+            </tr>
+          </thead>
+          <tbody id="productTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 3. 원료·부자재 수불부 탭 -->
+    <section id="view_material" class="flex-1 hidden flex-col overflow-hidden bg-white border border-gray-200 rounded-lg shadow-sm">
+      <div class="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 bg-gray-50">
+        <div class="flex items-center gap-3">
+          <h1 class="text-xl font-bold text-gray-900">원료·부자재 수불부</h1>
+          <div class="flex bg-gray-200 p-1 rounded-md text-xs font-bold">
+            <button onclick="switchMatSubTab('raw')" id="subTab_raw" class="px-3 py-1.5 rounded bg-white text-gray-900 shadow-sm">1. 원재료 재고 (105종)</button>
+            <button onclick="switchMatSubTab('sub')" id="subTab_sub" class="px-3 py-1.5 rounded text-gray-600 hover:text-gray-900">2. 부자재 재고 (80종)</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-sm">
+          <div class="bg-amber-50 border border-amber-200 px-3 py-1.5 rounded text-xs font-bold text-amber-900">
+            현재 탭 재고금액 합계: <span id="totalMatValue" class="text-sm text-amber-700">0</span>원
+          </div>
+          <input type="text" id="matSearch" oninput="renderMaterialTable()" placeholder="원료/자재명 또는 제조사 검색..." class="border border-gray-300 rounded px-3 py-1.5 text-sm w-56 bg-white">
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-auto p-4">
+        <table class="w-full text-xs border-collapse">
+          <thead class="sticky top-0 z-10">
+            <tr>
+              <th class="excel-th w-28">구분</th>
+              <th class="excel-th min-w-[220px]">품목명 (원료/부자재)</th>
+              <th class="excel-th w-24">기초재고</th>
+              <th class="excel-th w-24 bg-blue-100">신규입고(+)</th>
+              <th class="excel-th w-24 bg-rose-100">사용차감(-)</th>
+              <th class="excel-th w-28 bg-emerald-200">현재고</th>
+              <th class="excel-th w-24">단가</th>
+              <th class="excel-th w-32">재고금액</th>
+              <th class="excel-th w-32">제조사/거래처</th>
+              <th class="excel-th min-w-[140px]">비고</th>
+              <th class="excel-th w-28">사용 차감</th>
+            </tr>
+          </thead>
+          <tbody id="materialTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. 생산 일지 탭 -->
+    <section id="view_produce" class="flex-1 hidden flex-col overflow-hidden bg-white border border-gray-200 rounded-lg shadow-sm">
+      <div class="p-4 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 bg-gray-50">
+        <div>
+          <h1 class="text-xl font-bold text-gray-900">생산 일지 관리</h1>
+          <p class="text-xs text-gray-500 mt-0.5">생산 상태를 [완료]로 설정하면 해당 제품의 [제품 재고 관리] 생산입고(+) 수량에 자동 반영됩니다.</p>
+        </div>
+        <button onclick="openProduceModal()" class="bg-[#2c6e58] hover:bg-[#225745] text-white font-semibold px-4 py-1.5 rounded text-sm shadow-sm">+ 신규 생산 지시 등록</button>
+      </div>
+
+      <div class="flex-1 overflow-auto p-4">
+        <table class="w-full text-xs border-collapse">
+          <thead class="sticky top-0 z-10">
+            <tr>
+              <th class="excel-th w-32">지시번호</th>
+              <th class="excel-th w-28">지시일자</th>
+              <th class="excel-th w-24">품목구분</th>
+              <th class="excel-th w-24">생산품번</th>
+              <th class="excel-th min-w-[220px]">생산품명</th>
+              <th class="excel-th w-20">규격</th>
+              <th class="excel-th w-28">생산지시수량</th>
+              <th class="excel-th w-28">진행상태</th>
+              <th class="excel-th min-w-[150px]">비고</th>
+              <th class="excel-th w-24">상태변경</th>
+            </tr>
+          </thead>
+          <tbody id="produceTableBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 발주/입고 상세 등록 모달 -->
+  <div id="orderModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-[520px] p-6">
+      <h2 class="text-lg font-bold text-gray-900 mb-4 border-b pb-2">발주/입고 신규 등록</h2>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <label class="block font-semibold mb-1 text-xs">발주일 (예: 26.10.28)</label>
+          <input type="text" id="m_orderDt" value="26.10.28" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">입고일 (예: 10월 28일 / 미입고시 공란)</label>
+          <input type="text" id="m_inDt" placeholder="10월 28일" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div class="col-span-2">
+          <label class="block font-semibold mb-1 text-xs">품목명 (선택 시 이전 단가·거래처 자동완성)</label>
+          <input type="text" id="m_item" list="itemMasterList" oninput="autoFillOrderItem()" placeholder="품목명을 입력하거나 선택하세요" class="w-full border rounded px-2.5 py-1.5">
+          <datalist id="itemMasterList"></datalist>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">거래처</label>
+          <input type="text" id="m_vendor" placeholder="거래처명" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">단위</label>
+          <input type="text" id="m_unit" value="kg" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">원산지</label>
+          <input type="text" id="m_origin" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">소비기한</label>
+          <input type="text" id="m_exp" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">수량</label>
+          <input type="number" id="m_qty" oninput="calcModalPrice()" value="0" class="w-full border rounded px-2.5 py-1.5 text-right">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">단가(부전)</label>
+          <input type="number" id="m_price" oninput="calcModalPrice()" value="0" class="w-full border rounded px-2.5 py-1.5 text-right">
+        </div>
+        <div class="col-span-2 bg-amber-50 p-3 rounded border border-amber-200 text-right text-xs space-y-1">
+          <div>공급가: <span id="m_supply" class="font-bold">0</span>원 | 세액(10%): <span id="m_tax" class="font-bold">0</span>원</div>
+          <div class="text-sm text-blue-700 font-bold">합계 금액: <span id="m_total">0</span>원</div>
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end gap-2">
+        <button onclick="closeOrderModal()" class="px-4 py-1.5 bg-gray-200 rounded hover:bg-gray-300 text-sm font-semibold">취소</button>
+        <button onclick="saveModalOrder()" class="px-4 py-1.5 bg-[#2c6e58] text-white rounded hover:bg-[#225745] text-sm font-semibold">등록</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 생산 일지 등록 모달 -->
+  <div id="produceModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-[460px] p-6">
+      <h2 class="text-lg font-bold text-gray-900 mb-4 border-b pb-2">신규 생산 일지 등록</h2>
+      <div class="space-y-3 text-sm">
+        <div>
+          <label class="block font-semibold mb-1 text-xs">지시일자</label>
+          <input type="date" id="p_date" value="2026-10-28" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">생산 제품 선택</label>
+          <select id="p_itemSelect" class="w-full border rounded px-2.5 py-1.5 bg-white"></select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">생산 수량 (ea)</label>
+          <input type="number" id="p_qty" value="1000" class="w-full border rounded px-2.5 py-1.5 text-right">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">진행 상태</label>
+          <select id="p_status" class="w-full border rounded px-2.5 py-1.5 bg-white">
+            <option value="지시">지시 (재고 미반영)</option>
+            <option value="완료">완료 (제품 재고 즉시 +합산)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1 text-xs">비고</label>
+          <input type="text" id="p_rmk" placeholder="비고 입력" class="w-full border rounded px-2.5 py-1.5">
+        </div>
+      </div>
+      <div class="mt-5 flex justify-end gap-2">
+        <button onclick="closeProduceModal()" class="px-4 py-1.5 bg-gray-200 rounded hover:bg-gray-300 text-sm font-semibold">취소</button>
+        <button onclick="saveProduceItem()" class="px-4 py-1.5 bg-[#2c6e58] text-white rounded hover:bg-[#225745] text-sm font-semibold">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 구글 시트 연동 설정 모달 -->
+  <div id="sheetSyncModal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-[600px] p-6">
+      <div class="flex justify-between items-center border-b pb-3 mb-4">
+        <h2 class="text-lg font-bold text-gray-900">☁️ 구글 스프레드시트 실시간 연동 설정</h2>
+        <button onclick="closeSheetSyncModal()" class="text-gray-500 hover:text-gray-800 font-bold text-lg">✕</button>
+      </div>
+      <div class="space-y-4 text-xs text-gray-700">
+        <div>
+          <label class="block font-bold text-gray-900 mb-1">현재 연결된 구글 시트 웹 앱 URL:</label>
+          <div class="flex gap-2">
+            <input type="text" id="gasUrlInput" class="flex-1 border border-gray-300 rounded px-3 py-2 text-xs bg-gray-50 font-mono">
+            <button onclick="saveSheetUrl()" class="bg-[#2c6e58] text-white font-bold px-4 py-2 rounded">주소 저장</button>
+          </div>
+        </div>
+        <div class="bg-blue-50 border border-blue-200 p-3 rounded space-y-2">
+          <div class="font-bold text-blue-900">💡 시트에 데이터를 처음 넣으시려면?</div>
+          <p>상단 노란색 <b>[⬆️ 현재 데이터 구글 시트에 전체 저장]</b> 버튼을 누르면 시트에 자동으로 4개 탭이 생성되며 데이터가 저장됩니다.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 토스트 알림 -->
+  <div id="toastMsg" class="fixed bottom-5 right-5 bg-gray-900 text-white px-4 py-2.5 rounded-lg shadow-lg text-xs font-semibold hidden z-50"></div>
+
+  <script>
+    // 대표님의 구글 시트 웹앱 URL 기본 내장
+    const DEFAULT_GAS_URL = "https://script.google.com/macros/s/AKfycbytDtEHRYRHbBK0mUOuSVhaLN40Il8Jhd64YWmtv4natJMDet8nP5Yv65Vp6y6ANQcKvQ/exec";
+    let gasWebAppUrl = localStorage.getItem('cellina_gas_url') || DEFAULT_GAS_URL;
+    localStorage.setItem('cellina_gas_url', gasWebAppUrl);
+
+    function showToast(msg) {
+      const el = document.getElementById('toastMsg');
+      el.innerText = msg;
+      el.classList.remove('hidden');
+      setTimeout(() => el.classList.add('hidden'), 3200);
+    }
+
+    function fmt(n) {
+      if (n === null || n === undefined || n === '' || isNaN(Number(n))) return '';
+      return Number(n).toLocaleString('ko-KR', { maximumFractionDigits: 3 });
+    }
+
+    // 1. 2026 발주-입고 내역 실제 데이터 (81건)
+    let orderData = [
+      { id: 1, orderDt: '26.01.05', item: '탄산수소칼륨', origin: '', exp: '', unit: 'kg', qty: 300, price: 5200, supply: 1560000, tax: 156000, total: 1716000, vendor: '와이케이소재', inDt: '01월 06일', cert: true, billDt: '01월 15일', payDt: '01월 26일', isBase: true },
+      { id: 2, orderDt: '26.01.05', item: 'DL-사과산', origin: '', exp: '', unit: 'kg', qty: 50, price: 5000, supply: 250000, tax: 25000, total: 275000, vendor: '와이케이소재', inDt: '01월 08일', cert: true, billDt: '01월 15일', payDt: '01월 26일', isBase: true },
+      { id: 3, orderDt: '26.01.05', item: '탄산수소나트륨', origin: '', exp: '', unit: 'kg', qty: 125, price: 1400, supply: 175000, tax: 17500, total: 192500, vendor: '와이케이소재', inDt: '01월 08일', cert: true, billDt: '01월 15일', payDt: '01월 26일', isBase: true },
+      { id: 4, orderDt: '26.01.05', item: '사과초모식초분말', origin: '', exp: '', unit: 'kg', qty: 220, price: 23000, supply: 5060000, tax: 506000, total: 5566000, vendor: '해찬솔푸드', inDt: '01월 13일', cert: true, billDt: '01월 31일', payDt: '03월 05일', isBase: true },
+      { id: 5, orderDt: '26.01.05', item: '레드비트분말', origin: '', exp: '', unit: 'kg', qty: 60, price: 15500, supply: 930000, tax: 93000, total: 1023000, vendor: '올담식품', inDt: '01월 13일', cert: true, billDt: '01월 12일', payDt: '02월 04일', isBase: true },
+      { id: 6, orderDt: '26.01.05', item: '사과농축분말', origin: '', exp: '', unit: 'kg', qty: 100, price: 13000, supply: 1300000, tax: 130000, total: 1430000, vendor: '올담식품', inDt: '01월 13일', cert: true, billDt: '01월 12일', payDt: '02월 04일', isBase: true },
+      { id: 7, orderDt: '26.01.05', item: '사과향분말', origin: '', exp: '', unit: 'kg', qty: 40, price: 17500, supply: 700000, tax: 70000, total: 770000, vendor: '올담식품', inDt: '01월 13일', cert: true, billDt: '01월 12일', payDt: '02월 04일', isBase: true },
+      { id: 8, orderDt: '26.01.05', item: '난소화성말토덱스트린', origin: '', exp: '', unit: 'kg', qty: 500, price: 5900, supply: 2950000, tax: 295000, total: 3245000, vendor: '에스에스푸드켐', inDt: '01월 13일', cert: true, billDt: '01월 29일', payDt: '02월 04일', isBase: true },
+      { id: 9, orderDt: '26.01.05', item: '무수구연산', origin: '', exp: '', unit: 'kg', qty: 300, price: 1350, supply: 405000, tax: 35000, total: 440000, vendor: '남경유화', inDt: '01월 13일', cert: true, billDt: '01월 13일', payDt: '01월 13일', isBase: true },
+      { id: 10, orderDt: '26.01.14', item: '유산균혼합분말', origin: '', exp: '', unit: 'kg', qty: 1, price: 33000, supply: 33000, tax: 3300, total: 36300, vendor: '엔바이오텍', inDt: '01월 16일', cert: true, billDt: '01월 15일', payDt: '01월 15일', isBase: true },
+      { id: 11, orderDt: '26.01.20', item: 'L-리포좀 글루타치온(인도산)', origin: '인도', exp: '', unit: 'kg', qty: 200, price: 230000, supply: 46000000, tax: 4600000, total: 50600000, vendor: '비드야코리아', inDt: '01월 22일', cert: true, billDt: '01월 22일', payDt: '02월 04일', isBase: true },
+      { id: 12, orderDt: '26.01.27', item: 'L-아르기닌', origin: '', exp: '', unit: 'kg', qty: 3, price: 17000, supply: 51000, tax: 5100, total: 56100, vendor: '미래바이오텍', inDt: '02월 02일', cert: true, billDt: '01월 28일', payDt: '01월 28일', isBase: true },
+      { id: 13, orderDt: '26.01.27', item: '참존 자몽', origin: '', exp: '', unit: 'kg', qty: 120, price: 3270, supply: 392400, tax: 39240, total: 431640, vendor: '선인', inDt: '02월 02일', cert: true, billDt: '01월 29일', payDt: '02월 27일', isBase: true },
+      { id: 14, orderDt: '26.02.02', item: 'L-시스테인 염산염', origin: '', exp: '', unit: 'kg', qty: 100, price: 25000, supply: 2500000, tax: 250000, total: 2750000, vendor: '경흥아메스', inDt: '02월 05일', cert: true, billDt: '02월 03일', payDt: '02월 04일', isBase: true },
+      { id: 15, orderDt: '26.02.02', item: '구연산칼륨', origin: '', exp: '', unit: 'kg', qty: 2, price: 14500, supply: 29000, tax: 2900, total: 31900, vendor: '원아', inDt: '02월 03일', cert: true, billDt: '02월 02일', payDt: '02월 02일', isBase: true },
+      { id: 16, orderDt: '26.02.02', item: '피스타치오추출분말(멜라토닌)3%', origin: '', exp: '', unit: 'kg', qty: 10, price: 250000, supply: 2500000, tax: 250000, total: 2750000, vendor: '시너지바이오', inDt: '02월 04일', cert: true, billDt: '02월 02일', payDt: '02월 02일', isBase: true },
+      { id: 17, orderDt: '26.02.03', item: '무수결정포도당', origin: '', exp: '', unit: 'kg', qty: 40, price: 1240, supply: 49600, tax: 4960, total: 54560, vendor: '에스에스푸드켐', inDt: '02월 04일', cert: true, billDt: '02월 26일', payDt: '03월 05일', isBase: true },
+      { id: 18, orderDt: '26.02.03', item: '검정콩가루', origin: '', exp: '', unit: 'kg', qty: 19, price: 9000, supply: 171000, tax: 17100, total: 188100, vendor: '원올코리아', inDt: '02월 04일', cert: false, billDt: '02월 03일', payDt: '02월 03일', isBase: true },
+      { id: 19, orderDt: '26.02.03', item: '이산화규소', origin: '', exp: '', unit: 'kg', qty: 10, price: 15000, supply: 150000, tax: 15000, total: 165000, vendor: '비타민디아이와이', inDt: '02월 04일', cert: true, billDt: '02월 03일', payDt: '02월 03일', isBase: true },
+      { id: 20, orderDt: '26.02.04', item: '비타민A 325', origin: '', exp: '', unit: 'kg', qty: 5, price: 128000, supply: 640000, tax: 64000, total: 704000, vendor: '비타플러스', inDt: '02월 05일', cert: true, billDt: '02월 04일', payDt: '02월 04일', isBase: true },
+      { id: 21, orderDt: '26.02.11', item: '벨텍(핫멜트) supra 182', origin: '', exp: '', unit: 'kg', qty: 60, price: 4500, supply: 270000, tax: 27000, total: 297000, vendor: '벨텍(핫멜트)', inDt: '02월 13일', cert: false, billDt: '02월 11일', payDt: '02월 12일', isBase: true },
+      { id: 22, orderDt: '26.03.10', item: '참존 복숭아', origin: '', exp: '', unit: 'kg', qty: 84, price: 2636, supply: 221424, tax: 22142, total: 243566, vendor: '선인', inDt: '03월 18일', cert: true, billDt: '03월 16일', payDt: '03월 31일', isBase: true },
+      { id: 23, orderDt: '26.03.11', item: '석류농축액', origin: '', exp: '', unit: 'kg', qty: 400, price: 7500, supply: 3000000, tax: 300000, total: 3300000, vendor: '내츄럴스', inDt: '03월 17일', cert: true, billDt: '03월 12일', payDt: '04월 06일', isBase: true },
+      { id: 24, orderDt: '26.03.16', item: '자몽향분말', origin: '', exp: '', unit: 'kg', qty: 10, price: 30000, supply: 300000, tax: 30000, total: 330000, vendor: '한빛향료', inDt: '03월 19일', cert: true, billDt: '03월 18일', payDt: '03월 31일', isBase: true },
+      { id: 25, orderDt: '26.03.16', item: '망고향분말', origin: '', exp: '', unit: 'kg', qty: 10, price: 27000, supply: 270000, tax: 27000, total: 297000, vendor: '한빛향료', inDt: '03월 19일', cert: true, billDt: '03월 18일', payDt: '03월 31일', isBase: true },
+      { id: 26, orderDt: '26.03.16', item: '망고농축액(이스라엘산)9012', origin: '이스라엘', exp: '', unit: 'kg', qty: 10, price: 11000, supply: 110000, tax: 11000, total: 121000, vendor: '세계에프엘', inDt: '03월 17일', cert: true, billDt: '03월 16일', payDt: '03월 16일', isBase: true },
+      { id: 27, orderDt: '26.03.26', item: '비오틴', origin: '프랑스', exp: '2028.02.18', unit: 'kg', qty: 25, price: 380000, supply: 9500000, tax: 950000, total: 10450000, vendor: '케미넥스', inDt: '04월 01일', cert: true, billDt: '03월 31일', payDt: '03월 31일', isBase: true },
+      { id: 28, orderDt: '26.03.26', item: 'L-테아닌', origin: '중국', exp: '2027.10.16', unit: 'kg', qty: 5, price: 45000, supply: 225000, tax: 22500, total: 247500, vendor: '동은', inDt: '03월 27일', cert: true, billDt: '03월 26일', payDt: '03월 26일', isBase: true },
+      { id: 29, orderDt: '26.03.26', item: '리포좀 비타민 미네랄 16 컴플렉스', origin: '인도', exp: '2027.08.31', unit: 'kg', qty: 80, price: 55000, supply: 4400000, tax: 440000, total: 4840000, vendor: '비드야코리아', inDt: '04월 01일', cert: true, billDt: '03월 31일', payDt: '04월 06일', isBase: true },
+      { id: 30, orderDt: '26.03.27', item: '비타민C', origin: '중국', exp: '2028.12.01', unit: 'kg', qty: 1000, price: 4200, supply: 4200000, tax: 420000, total: 4620000, vendor: '경흥아메스', inDt: '04월 01일', cert: true, billDt: '03월 30일', payDt: '04월 06일', isBase: true },
+      { id: 31, orderDt: '26.03.27', item: '석류향(액상) (HF-BB25111)', origin: '국산', exp: '2028.03.29', unit: 'kg', qty: 110, price: 27000, supply: 2970000, tax: 297000, total: 3267000, vendor: '한빛향료', inDt: '04월 01일', cert: true, billDt: '03월 31일', payDt: '04월 06일', isBase: true },
+      { id: 32, orderDt: '26.03.27', item: '레몬향분말H', origin: '국산', exp: '2028.03.16', unit: 'kg', qty: 60, price: 25000, supply: 1500000, tax: 150000, total: 1650000, vendor: '한빛향료', inDt: '04월 01일', cert: true, billDt: '03월 31일', payDt: '04월 06일', isBase: true },
+      { id: 33, orderDt: '26.03.30', item: '무수구연산', origin: '오스트리아', exp: '2028.11.30', unit: 'kg', qty: 675, price: 3250, supply: 2193750, tax: 219375, total: 2413125, vendor: '와이케이소재', inDt: '04월 01일', cert: true, billDt: '03월 31일', payDt: '04월 06일', isBase: true },
+      { id: 34, orderDt: '26.03.30', item: '난소화성말토덱스트린', origin: '중국', exp: '2027.11.09', unit: 'kg', qty: 640, price: 5900, supply: 3776000, tax: 377600, total: 4153600, vendor: '에스에스푸드켐', inDt: '04월 01일', cert: true, billDt: '04월 01일', payDt: '05월 08일', isBase: true },
+      { id: 35, orderDt: '26.03.30', item: '오징어먹물색소', origin: '국산', exp: '2028.03.31', unit: 'kg', qty: 60, price: 30000, supply: 1800000, tax: 180000, total: 1980000, vendor: '천연식품', inDt: '04월 03일', cert: true, billDt: '04월 01일', payDt: '05월 08일', isBase: true },
+      { id: 36, orderDt: '26.04.01', item: '사과초모식초분말', origin: '국산', exp: '2028.02.22', unit: 'kg', qty: 400, price: 23000, supply: 9200000, tax: 920000, total: 10120000, vendor: '해찬솔푸드', inDt: '04월 06일', cert: true, billDt: '04월 30일', payDt: '05월 08일', isBase: true },
+      { id: 37, orderDt: '26.04.01', item: '레드비트분말', origin: '국산', exp: '2028.03.29', unit: 'kg', qty: 80, price: 15500, supply: 1240000, tax: 124000, total: 1364000, vendor: '올담식품', inDt: '04월 07일', cert: true, billDt: '04월 02일', payDt: '05월 08일', isBase: true },
+      { id: 38, orderDt: '26.04.01', item: '사과향분말', origin: '국산', exp: '2028.03.30', unit: 'kg', qty: 40, price: 17500, supply: 700000, tax: 70000, total: 770000, vendor: '올담식품', inDt: '04월 07일', cert: true, billDt: '04월 02일', payDt: '05월 08일', isBase: true },
+      { id: 39, orderDt: '26.04.01', item: '사과농축분말(국산)', origin: '국산', exp: '2028.04.05', unit: 'kg', qty: 100, price: 13000, supply: 1300000, tax: 130000, total: 1430000, vendor: '올담식품', inDt: '04월 07일', cert: true, billDt: '04월 02일', payDt: '05월 08일', isBase: true },
+      { id: 40, orderDt: '26.04.01', item: '탄산수소칼륨', origin: '국산', exp: '2028.01.18', unit: 'kg', qty: 280, price: 5200, supply: 1456000, tax: 145600, total: 1601600, vendor: '와이케이소재', inDt: '04월 03일', cert: true, billDt: '04월 15일', payDt: '05월 08일', isBase: true },
+      { id: 41, orderDt: '26.04.01', item: '탄산수소나트륨', origin: '국산', exp: '2027.12.23', unit: 'kg', qty: 140, price: 1400, supply: 196000, tax: 19600, total: 215600, vendor: '와이케이소재', inDt: '04월 03일', cert: true, billDt: '04월 15일', payDt: '05월 08일', isBase: true },
+      { id: 42, orderDt: '26.04.01', item: 'DL-사과산', origin: '인도', exp: '2027.12.01', unit: 'kg', qty: 120, price: 5000, supply: 600000, tax: 60000, total: 660000, vendor: '와이케이소재', inDt: '04월 03일', cert: true, billDt: '04월 15일', payDt: '05월 08일', isBase: true },
+      { id: 43, orderDt: '26.04.22', item: '녹차가루(국산)', origin: '국산', exp: '2028.04.19', unit: 'kg', qty: 50, price: 16370, supply: 818500, tax: 81850, total: 900350, vendor: '농업회사법인 제이엠', inDt: '04월 24일', cert: true, billDt: '04월 23일', payDt: '05월 08일', isBase: true },
+      { id: 44, orderDt: '26.04.22', item: '커피원두분말', origin: '', exp: '', unit: 'kg', qty: 1, price: 40000, supply: 40000, tax: 4000, total: 44000, vendor: '씨오 에프앤비', inDt: '04월 23일', cert: false, billDt: '04월 21일', payDt: '04월 21일', isBase: true },
+      { id: 45, orderDt: '26.04.28', item: '검정깨분말 (볶은흑임자분말)', origin: '중국', exp: '2027.04.12', unit: 'kg', qty: 20, price: 7900, supply: 158000, tax: 15800, total: 173800, vendor: '맑은들', inDt: '04월 29일', cert: true, billDt: '04월 29일', payDt: '05월 08일', isBase: true },
+      { id: 46, orderDt: '26.04.28', item: '흑임자향분말', origin: '국산', exp: '2028.04.27', unit: 'kg', qty: 60, price: 20000, supply: 1200000, tax: 120000, total: 1320000, vendor: '한빛향료', inDt: '05월 06일', cert: true, billDt: '04월 30일', payDt: '05월 08일', isBase: true },
+      { id: 47, orderDt: '26.04.28', item: '버터혼합분말', origin: '국산/호주', exp: '2026.12.16', unit: 'kg', qty: 80, price: 11200, supply: 896000, tax: 89600, total: 985600, vendor: '삼정바이오', inDt: '04월 29일', cert: true, billDt: '04월 29일', payDt: '05월 08일', isBase: true },
+      { id: 48, orderDt: '26.04.28', item: '분리대두단백ISP(중국)', origin: '중국', exp: '2027.07.14', unit: 'kg', qty: 500, price: 3850, supply: 1925000, tax: 192500, total: 2117500, vendor: '삼정바이오', inDt: '04월 29일', cert: true, billDt: '04월 29일', payDt: '05월 08일', isBase: true },
+      { id: 49, orderDt: '26.04.28', item: '미분염', origin: '국산', exp: '2031.02.09', unit: 'kg', qty: 25, price: 2187, supply: 54675, tax: 5468, total: 60143, vendor: '소금성', inDt: '04월 29일', cert: false, billDt: '', payDt: '네이버페이', isBase: true },
+      { id: 50, orderDt: '26.04.28', item: '딸기농축분말', origin: '국산', exp: '2028.04.29', unit: 'kg', qty: 20, price: 18000, supply: 360000, tax: 36000, total: 396000, vendor: '올담식품', inDt: '05월 06일', cert: true, billDt: '04월 30일', payDt: '05월 08일', isBase: true },
+      { id: 51, orderDt: '26.04.28', item: '볶음검정깨(베트남)', origin: '베트남', exp: '2027.04.27', unit: 'kg', qty: 50, price: 6200, supply: 310000, tax: 31000, total: 341000, vendor: '원올코리아', inDt: '04월 29일', cert: true, billDt: '04월 28일', payDt: '04월 28일', isBase: true },
+      { id: 52, orderDt: '26.04.28', item: '자주색고구마색소', origin: '중국', exp: '2028.04.27', unit: 'kg', qty: 50, price: 50000, supply: 2500000, tax: 250000, total: 2750000, vendor: '천연식품', inDt: '04월 30일', cert: true, billDt: '04월 29일', payDt: '05월 08일', isBase: true },
+      { id: 53, orderDt: '26.04.28', item: '폴리덱스트로스', origin: '중국', exp: '2028.01.07', unit: 'kg', qty: 20, price: 4000, supply: 80000, tax: 8000, total: 88000, vendor: '푸드올마켓', inDt: '04월 29일', cert: true, billDt: '', payDt: '네이버페이', isBase: true },
+      { id: 54, orderDt: '26.04.28', item: '잔탄검', origin: '중국', exp: '2027.12.23', unit: 'kg', qty: 25, price: 6654, supply: 166350, tax: 16635, total: 182985, vendor: '헬로베이킹', inDt: '04월 30일', cert: false, billDt: '', payDt: '네이버페이', isBase: true },
+      { id: 55, orderDt: '26.09.10', item: 'L-시스틴', origin: '중국', exp: '2028.06.03', unit: 'kg', qty: 1000, price: 38000, supply: 38000000, tax: 3800000, total: 41800000, vendor: '경흥아메스', inDt: '09월 15일', cert: true, billDt: '09월 15일', payDt: '', isBase: true },
+      { id: 56, orderDt: '26.09.10', item: '효모식품 (L-글루타치온 98%)', origin: '중국', exp: '2028.07.28', unit: 'kg', qty: 1100, price: 115000, supply: 126500000, tax: 12650000, total: 139150000, vendor: '경흥아메스', inDt: '09월 15일', cert: true, billDt: '09월 15일', payDt: '', isBase: true },
+      { id: 57, orderDt: '26.09.11', item: '분리대두단백ISP(중국)', origin: '중국', exp: '2028.04.01', unit: 'kg', qty: 500, price: 3850, supply: 1925000, tax: 192500, total: 2117500, vendor: '삼정바이오', inDt: '09월 15일', cert: true, billDt: '09월 14일', payDt: '', isBase: true },
+      { id: 58, orderDt: '26.09.11', item: '베트남 SD다크커피', origin: '베트남', exp: '2028.03.11', unit: 'kg', qty: 25, price: 34000, supply: 850000, tax: 85000, total: 935000, vendor: '제이더스화학', inDt: '09월 15일', cert: true, billDt: '09월 11일', payDt: '09월 11일', isBase: true },
+      { id: 59, orderDt: '26.09.11', item: '택배박스_기본박스', origin: '(340*240*100)', exp: '', unit: '개', qty: 3000, price: 215, supply: 645000, tax: 64500, total: 709500, vendor: '풍림포장', inDt: '09월 16일', cert: false, billDt: '09월 30일', payDt: '', isBase: true },
+      { id: 60, orderDt: '26.09.11', item: '택배박스_앰플카톤박스', origin: '(500*360*260)', exp: '', unit: '개', qty: 1500, price: 680, supply: 1020000, tax: 102000, total: 1122000, vendor: '풍림포장', inDt: '09월 16일', cert: false, billDt: '09월 30일', payDt: '', isBase: true },
+      { id: 61, orderDt: '26.09.11', item: '택배박스_카톤박스', origin: '(410*300*350)', exp: '', unit: '개', qty: 2000, price: 690, supply: 1380000, tax: 138000, total: 1518000, vendor: '풍림포장', inDt: '09월 16일', cert: false, billDt: '09월 30일', payDt: '', isBase: true }
+    ];
+
+    // 2. 제품 재고 37종 (2026 재무제표용 전체재고 반영)
+    let productData = [
+      { cat: '일반식품', name: '하이프로틴 쉐이크 오리지널', baseQty: 2016, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.08.17' },
+      { cat: '일반식품', name: '하이프로틴 쉐이크 초코', baseQty: 2639, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.08.18' },
+      { cat: '일반식품', name: '하이프로틴 쉐이크 딸기', baseQty: 2812, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.08.19' },
+      { cat: '일반식품', name: '하이프로틴 쉐이크 바나나', baseQty: 3008, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.08.20' },
+      { cat: '일반식품', name: '하이프로틴 녹차 단백질 쉐이크', baseQty: 3422, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.05.11' },
+      { cat: '일반식품', name: '하이프로틴 흑임자 단백질 쉐이크', baseQty: 3021, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.05.12' },
+      { cat: '일반식품', name: '하이프로틴 피치요거트 단백질 쉐이크', baseQty: 2292, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.05.13' },
+      { cat: '일반식품', name: '하이프로틴 자색고구마 단백질 쉐이크', baseQty: 2678, outQty: 0, price: 6300, vendor: '셀리나', rmk: '2027.05.14' },
+      { cat: '일반식품', name: '패스팅 다이어트', baseQty: 2274, outQty: 0, price: 4600, vendor: '셀리나', rmk: '2027.03.02' },
+      { cat: '일반식품', name: '선샤인 글루타치온 10X', baseQty: 0, outQty: 0, price: 3660, vendor: '셀리나', rmk: '재고 소진' },
+      { cat: '일반식품', name: '선샤인 글루타치온 20X', baseQty: 8160, outQty: 0, price: 4900, vendor: '셀리나', rmk: '2028.01.25' },
+      { cat: '일반식품', name: '폴라콜라겐 50000', baseQty: 915, outQty: 0, price: 6700, vendor: '셀리나', rmk: '2027.09.10' },
+      { cat: '일반식품', name: '애사비 스파클링', baseQty: 13201, outQty: 0, price: 2400, vendor: '셀리나', rmk: '3,530개 완포장 미작업' },
+      { cat: '일반식품', name: '닥터디엣 빼자벅스', baseQty: 3038, outQty: 0, price: 3800, vendor: '셀리나', rmk: '2027.06.15' },
+      { cat: '건강기능식품', name: '닥터디엣 버닝플로우 나이트타임', baseQty: 1852, outQty: 0, price: 8500, vendor: '셀리나', rmk: '2027.04.10' },
+      { cat: '건강기능식품', name: '셀리나 글루타치온 분말', baseQty: 4000, outQty: 0, price: 3000, vendor: '셀리나', rmk: '미포장 상태' },
+      { cat: '건강기능식품', name: '리포좀 커큐민', baseQty: 3290, outQty: 0, price: 3500, vendor: '셀리나', rmk: '2027.11.01' },
+      { cat: '건강기능식품', name: '컨트롤 다이렉트', baseQty: 4230, outQty: 0, price: 4000, vendor: '셀리나', rmk: '2027.10.12' },
+      { cat: '건강기능식품', name: '부기 다이렉트', baseQty: 3800, outQty: 0, price: 3600, vendor: '셀리나', rmk: '2027.10.15' },
+      { cat: '건강기능식품', name: '굿나잇 멜라토닌 리포좀 포뮬러', baseQty: 1995, outQty: 0, price: 4710, vendor: '셀리나', rmk: '2028.02.09' },
+      { cat: '건강기능식품', name: '매실효소', baseQty: 4000, outQty: 0, price: 3000, vendor: '셀리나', rmk: '미포장 상태' },
+      { cat: '건강기능식품', name: '이뮨 리포좀 멀티비타민 키즈', baseQty: 5624, outQty: 0, price: 3100, vendor: '셀리나', rmk: '2028.04.05' },
+      { cat: '건강기능식품', name: '이뮨 리포좀 멀티비타민 성인', baseQty: 5642, outQty: 0, price: 3400, vendor: '셀리나', rmk: '2028.04.05' },
+      { cat: '기타', name: '셀리나 글루타치온 정', baseQty: 4000, outQty: 0, price: 2000, vendor: '셀리나', rmk: '타정 완료 / 후포장 전' },
+      { cat: '건강기능식품', name: '셀리나 파인애플 효소', baseQty: 4000, outQty: 0, price: 3000, vendor: '셀리나', rmk: '미포장 상태' },
+      { cat: '건강기능식품', name: '셀리나 스위트 레몬 비타민C 1000', baseQty: 4000, outQty: 0, price: 3000, vendor: '셀리나', rmk: '미포장 상태' },
+      { cat: '기타', name: '트라이탄마이보틀', baseQty: 3080, outQty: 0, price: 1180, vendor: '셀리나', rmk: '보틀 단품' }
+    ];
+
+    // 3. 원재료 및 부자재 기초재고
+    let rawMaterialData = [
+      { cat: '단백질', name: '분리대두단백ISP(중국)', baseQty: 748.5, useQty: 0, price: 3850, vendor: '삼정바이오', rmk: 'kg' },
+      { cat: '아미노산', name: 'L-시스틴', baseQty: 1095.052, useQty: 0, price: 38000, vendor: '경흥아메스', rmk: 'kg' },
+      { cat: '추출분말', name: '효모식품 (L-글루타치온 98%)', baseQty: 1094.948, useQty: 0, price: 115000, vendor: '경흥아메스', rmk: 'kg' },
+      { cat: '추출분말', name: '사과초모식초분말', baseQty: 620, useQty: 0, price: 23000, vendor: '해찬솔푸드', rmk: 'kg' },
+      { cat: '부형제', name: '난소화성말토덱스트린', baseQty: 1240, useQty: 0, price: 5900, vendor: '에스에스푸드켐', rmk: 'kg' },
+      { cat: '산미료', name: '무수구연산', baseQty: 975, useQty: 0, price: 3250, vendor: '와이케이소재', rmk: 'kg' },
+      { cat: '미네랄', name: '탄산수소칼륨', baseQty: 580, useQty: 0, price: 5200, vendor: '와이케이소재', rmk: 'kg' },
+      { cat: '미네랄', name: '탄산수소나트륨', baseQty: 265, useQty: 0, price: 1400, vendor: '와이케이소재', rmk: 'kg' },
+      { cat: '산미료', name: 'DL-사과산', baseQty: 170, useQty: 0, price: 5000, vendor: '와이케이소재', rmk: 'kg' },
+      { cat: '추출분말', name: 'L-리포좀 글루타치온(인도산)', baseQty: 400, useQty: 0, price: 230000, vendor: '비드야코리아', rmk: 'kg' },
+      { cat: '비타민', name: '비타민C', baseQty: 1000, useQty: 0, price: 4200, vendor: '경흥아메스', rmk: 'kg' },
+      { cat: '비타민', name: '비오틴', baseQty: 25, useQty: 0, price: 380000, vendor: '케미넥스', rmk: 'kg' },
+      { cat: '비타민', name: '리포좀 비타민 미네랄 16 컴플렉스', baseQty: 100, useQty: 0, price: 55000, vendor: '비드야코리아', rmk: 'kg' },
+      { cat: '과일농축', name: '석류농축액', baseQty: 420, useQty: 0, price: 7500, vendor: '내츄럴스', rmk: 'kg' },
+      { cat: '과일농축', name: '사과농축분말(국산)', baseQty: 200, useQty: 0, price: 13000, vendor: '올담식품', rmk: 'kg' },
+      { cat: '추출분말', name: '레드비트분말', baseQty: 140, useQty: 0, price: 15500, vendor: '올담식품', rmk: 'kg' },
+      { cat: '향료', name: '사과향분말', baseQty: 80, useQty: 0, price: 17500, vendor: '올담식품', rmk: 'kg' },
+      { cat: '향료', name: '석류향(액상) (HF-BB25111)', baseQty: 120, useQty: 0, price: 27000, vendor: '한빛향료', rmk: 'kg' },
+      { cat: '향료', name: '레몬향분말H', baseQty: 60, useQty: 0, price: 25000, vendor: '한빛향료', rmk: 'kg' },
+      { cat: '향료', name: '흑임자향분말', baseQty: 67, useQty: 0, price: 20000, vendor: '한빛향료', rmk: 'kg' },
+      { cat: '원재료', name: '베트남 SD다크커피', baseQty: 25, useQty: 0, price: 34000, vendor: '제이더스화학', rmk: 'kg' }
+    ];
+
+    let subMaterialData = [
+      { cat: '택배박스', name: '택배박스_기본박스', baseQty: 3100, useQty: 0, price: 215, vendor: '풍림포장', rmk: '(340*240*100)' },
+      { cat: '택배박스', name: '택배박스_앰플카톤박스', baseQty: 1602, useQty: 0, price: 680, vendor: '풍림포장', rmk: '(500*360*260)' },
+      { cat: '택배박스', name: '택배박스_카톤박스', baseQty: 2000, useQty: 0, price: 690, vendor: '풍림포장', rmk: '(410*300*350)' },
+      { cat: '단상자', name: '하이프로틴 오리지널 내박스', baseQty: 8500, useQty: 0, price: 110, vendor: '월드코스텍', rmk: 'ea' },
+      { cat: '단상자', name: '하이프로틴 초코 내박스', baseQty: 7900, useQty: 0, price: 110, vendor: '월드코스텍', rmk: 'ea' },
+      { cat: '단상자', name: '글루타치온 20X 내박스', baseQty: 12000, useQty: 0, price: 120, vendor: '월드코스텍', rmk: 'ea' },
+      { cat: '롤필름', name: '하이프로틴 오리지널 필름', baseQty: 4, useQty: 0, price: 620000, vendor: '굿씨드', rmk: '롤' },
+      { cat: '롤필름', name: '닥터디엣 PE 필름 파랑', baseQty: 6, useQty: 0, price: 181820, vendor: '굿씨드', rmk: '1롤 30kg' },
+      { cat: '용기', name: 'new 앰플용기', baseQty: 268800, useQty: 0, price: 180, vendor: '경흥아메스', rmk: '스트랩' }
+    ];
+
+    // 4. 생산 일지 데이터
+    let produceData = [
+      { id: 'BA261028003', dt: '2026-10-28', cat: '건강기능식품', code: 'CE033', name: '글루타치온 복합물', std: 'ea', qty: 10, status: '완료', rmk: '기초 반영분', isBase: true },
+      { id: 'BA261028002', dt: '2026-10-28', cat: '일반식품', code: 'CE001', name: '하이프로틴 쉐이크 오리지널', std: 'ea', qty: 5000, status: '지시', rmk: '생산 대기중', isBase: false },
+      { id: 'BA261007001', dt: '2026-10-07', cat: '일반식품', code: 'CE002', name: '하이프로틴 쉐이크 초코', std: 'ea', qty: 1, status: '완료', rmk: '기초 반영분', isBase: true }
+    ];
+
+    let currentMatSubTab = 'raw';
+
+    // 탭 전환
+    function switchTab(tab) {
+      ['order', 'product', 'material', 'produce'].forEach(t => {
+        document.getElementById('view_' + t).classList.add('hidden');
+        document.getElementById('view_' + t).classList.remove('flex');
+        const btn = document.getElementById('tab_' + t);
+        btn.className = 'px-4 py-2 rounded-md hover:bg-[#388269] text-gray-100 transition';
+      });
+      const activeView = document.getElementById('view_' + tab);
+      activeView.classList.remove('hidden');
+      activeView.classList.add('flex');
+      document.getElementById('tab_' + tab).className = 'px-4 py-2 rounded-md bg-[#52b793] text-white shadow-sm transition';
+
+      if (tab === 'order') renderOrderTable();
+      if (tab === 'product') renderProductTable();
+      if (tab === 'material') renderMaterialTable();
+      if (tab === 'produce') renderProduceTable();
+    }
+
+    // 1. 발주/입고 테이블 렌더링
+    function renderOrderTable() {
+      const itemKw = (document.getElementById('orderSearchItem').value || '').toLowerCase();
+      const vendorKw = (document.getElementById('orderSearchVendor').value || '').toLowerCase();
+      const tbody = document.getElementById('orderTableBody');
+      tbody.innerHTML = '';
+
+      let sumQty = 0, sumSupply = 0, sumTax = 0, sumTotal = 0;
+
+      orderData.forEach((row, idx) => {
+        if (itemKw && !row.item.toLowerCase().includes(itemKw)) return;
+        if (vendorKw && !row.vendor.toLowerCase().includes(vendorKw)) return;
+
+        sumQty += Number(row.qty) || 0;
+        sumSupply += Number(row.supply) || 0;
+        sumTax += Number(row.tax) || 0;
+        sumTotal += Number(row.total) || 0;
+
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-amber-50/40';
+        tr.innerHTML = `
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.orderDt}" onchange="updateOrderCell(${idx}, 'orderDt', this.value)"></td>
+          <td class="excel-td font-semibold"><input class="cell-input font-semibold" value="${row.item}" onchange="updateOrderCell(${idx}, 'item', this.value)"></td>
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.origin}" onchange="updateOrderCell(${idx}, 'origin', this.value)"></td>
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.exp}" onchange="updateOrderCell(${idx}, 'exp', this.value)"></td>
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.unit}" onchange="updateOrderCell(${idx}, 'unit', this.value)"></td>
+          <td class="excel-td text-right"><input type="number" class="cell-input text-right" value="${row.qty}" onchange="updateOrderCell(${idx}, 'qty', this.value)"></td>
+          <td class="excel-td text-right"><input type="number" class="cell-input text-right" value="${row.price}" onchange="updateOrderCell(${idx}, 'price', this.value)"></td>
+          <td class="excel-td text-right bg-gray-50">${fmt(row.supply)}</td>
+          <td class="excel-td text-right bg-gray-50">${fmt(row.tax)}</td>
+          <td class="excel-td text-right font-bold bg-amber-50/40">${fmt(row.total)}</td>
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.vendor}" onchange="updateOrderCell(${idx}, 'vendor', this.value)"></td>
+          <td class="excel-td text-center"><input class="cell-input text-center text-blue-700 font-medium" value="${row.inDt}" placeholder="미입고" onchange="updateOrderCell(${idx}, 'inDt', this.value)"></td>
+          <td class="excel-td text-center"><input type="checkbox" ${row.cert ? 'checked' : ''} onchange="updateOrderCell(${idx}, 'cert', this.checked)" class="w-4 h-4 accent-[#2c6e58] cursor-pointer"></td>
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.billDt}" onchange="updateOrderCell(${idx}, 'billDt', this.value)"></td>
+          <td class="excel-td text-center"><input class="cell-input text-center" value="${row.payDt}" onchange="updateOrderCell(${idx}, 'payDt', this.value)"></td>
+          <td class="excel-td text-center"><button onclick="deleteOrderRow(${idx})" class="text-rose-500 hover:text-rose-700 font-bold">✕</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('orderTableFoot').innerHTML = `
+        <tr>
+          <td colspan="5" class="excel-td text-center">합계 (조회된 내역)</td>
+          <td class="excel-td text-right">${fmt(sumQty)}</td>
+          <td class="excel-td"></td>
+          <td class="excel-td text-right">${fmt(sumSupply)}</td>
+          <td class="excel-td text-right">${fmt(sumTax)}</td>
+          <td class="excel-td text-right text-blue-700">${fmt(sumTotal)}</td>
+          <td colspan="6" class="excel-td"></td>
+        </tr>
+      `;
+    }
+
+    function updateOrderCell(idx, field, val) {
+      if (field === 'qty' || field === 'price') {
+        orderData[idx][field] = Number(val) || 0;
+        orderData[idx].supply = orderData[idx].qty * orderData[idx].price;
+        orderData[idx].tax = Math.floor(orderData[idx].supply * 0.1);
+        orderData[idx].total = orderData[idx].supply + orderData[idx].tax;
+      } else {
+        orderData[idx][field] = val;
+      }
+      renderOrderTable();
+    }
+
+    function addBlankOrderRow() {
+      orderData.unshift({
+        id: Date.now(), orderDt: '26.10.28', item: '', origin: '', exp: '', unit: 'kg',
+        qty: 0, price: 0, supply: 0, tax: 0, total: 0, vendor: '', inDt: '', cert: false, billDt: '', payDt: '', isBase: false
+      });
+      renderOrderTable();
+      showToast('맨 위에 빈 행이 추가되었습니다.');
+    }
+
+    function deleteOrderRow(idx) {
+      orderData.splice(idx, 1);
+      renderOrderTable();
+    }
+
+    function resetOrderFilter() {
+      document.getElementById('orderSearchItem').value = '';
+      document.getElementById('orderSearchVendor').value = '';
+      renderOrderTable();
+    }
+
+    // 신규 입고분 계산 (isBase가 아닌 건 중 입고일이 적힌 수량 합산)
+    function getAdditionalInQty(itemName) {
+      return orderData
+        .filter(o => !o.isBase && o.item.trim() === itemName.trim() && o.inDt && o.inDt.trim() !== '')
+        .reduce((acc, cur) => acc + (Number(cur.qty) || 0), 0);
+    }
+
+    // 생산 완료분 계산
+    function getProducedInQty(prodName) {
+      return produceData
+        .filter(p => !p.isBase && p.name.trim() === prodName.trim() && p.status === '완료')
+        .reduce((acc, cur) => acc + (Number(cur.qty) || 0), 0);
+    }
+
+    // 2. 제품 재고 관리 렌더링
+    function renderProductTable() {
+      const cat = document.getElementById('prodCatFilter').value;
+      const kw = (document.getElementById('prodSearch').value || '').toLowerCase();
+      const tbody = document.getElementById('productTableBody');
+      tbody.innerHTML = '';
+
+      let totalVal = 0;
+      productData.forEach((row, idx) => {
+        const prodIn = getProducedInQty(row.name);
+        const stock = row.baseQty + prodIn - row.outQty;
+        const val = stock * row.price;
+        totalVal += val;
+
+        if (cat !== 'ALL' && row.cat !== cat) return;
+        if (kw && !row.name.toLowerCase().includes(kw)) return;
+
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.innerHTML = `
+          <td class="excel-td text-center font-medium">${row.cat}</td>
+          <td class="excel-td font-bold">${row.name}</td>
+          <td class="excel-td text-right">${fmt(row.baseQty)}</td>
+          <td class="excel-td text-right text-blue-700 font-semibold bg-blue-50/40">+${fmt(prodIn)}</td>
+          <td class="excel-td text-right text-rose-600 font-semibold bg-rose-50/40">-${fmt(row.outQty)}</td>
+          <td class="excel-td text-right font-extrabold text-emerald-800 bg-emerald-50">${fmt(stock)}</td>
+          <td class="excel-td text-right">${fmt(row.price)}</td>
+          <td class="excel-td text-right font-semibold">${fmt(val)}</td>
+          <td class="excel-td text-center">${row.vendor}</td>
+          <td class="excel-td"><input class="cell-input text-xs" value="${row.rmk}" onchange="productData[${idx}].rmk=this.value"></td>
+          <td class="excel-td text-center">
+            <div class="flex items-center gap-1">
+              <input type="number" id="outInput_${idx}" placeholder="수량" class="w-14 border rounded px-1 py-0.5 text-right text-xs">
+              <button onclick="applyProductOut(${idx})" class="bg-rose-600 text-white px-2 py-0.5 rounded text-xs font-bold hover:bg-rose-700">출고</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('totalProductValue').innerText = fmt(totalVal);
+    }
+
+    function applyProductOut(idx) {
+      const val = Number(document.getElementById('outInput_' + idx).value) || 0;
+      if (val <= 0) return;
+      productData[idx].outQty += val;
+      renderProductTable();
+      showToast(`${productData[idx].name} ${fmt(val)}개 출고 반영되었습니다.`);
+    }
+
+    // 3. 원료·부자재 수불부 렌더링
+    function switchMatSubTab(sub) {
+      currentMatSubTab = sub;
+      document.getElementById('subTab_raw').className = sub === 'raw' ? 'px-3 py-1.5 rounded bg-white text-gray-900 shadow-sm' : 'px-3 py-1.5 rounded text-gray-600 hover:text-gray-900';
+      document.getElementById('subTab_sub').className = sub === 'sub' ? 'px-3 py-1.5 rounded bg-white text-gray-900 shadow-sm' : 'px-3 py-1.5 rounded text-gray-600 hover:text-gray-900';
+      renderMaterialTable();
+    }
+
+    function renderMaterialTable() {
+      const list = currentMatSubTab === 'raw' ? rawMaterialData : subMaterialData;
+      const kw = (document.getElementById('matSearch').value || '').toLowerCase();
+      const tbody = document.getElementById('materialTableBody');
+      tbody.innerHTML = '';
+
+      let totalVal = 0;
+      list.forEach((row, idx) => {
+        const addIn = getAdditionalInQty(row.name);
+        const stock = row.baseQty + addIn - row.useQty;
+        const val = stock * row.price;
+        totalVal += val;
+
+        if (kw && !row.name.toLowerCase().includes(kw) && !row.vendor.toLowerCase().includes(kw)) return;
+
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.innerHTML = `
+          <td class="excel-td text-center">${row.cat}</td>
+          <td class="excel-td font-bold">${row.name}</td>
+          <td class="excel-td text-right">${fmt(row.baseQty)}</td>
+          <td class="excel-td text-right text-blue-700 font-semibold bg-blue-50/40">+${fmt(addIn)}</td>
+          <td class="excel-td text-right text-rose-600 font-semibold bg-rose-50/40">-${fmt(row.useQty)}</td>
+          <td class="excel-td text-right font-extrabold text-emerald-800 bg-emerald-50">${fmt(stock)}</td>
+          <td class="excel-td text-right">${fmt(row.price)}</td>
+          <td class="excel-td text-right font-semibold">${fmt(val)}</td>
+          <td class="excel-td text-center">${row.vendor}</td>
+          <td class="excel-td text-center">${row.rmk}</td>
+          <td class="excel-td text-center">
+            <div class="flex items-center gap-1">
+              <input type="number" step="0.001" id="useInput_${idx}" placeholder="수량" class="w-14 border rounded px-1 py-0.5 text-right text-xs">
+              <button onclick="applyMaterialUse(${idx})" class="bg-amber-600 text-white px-2 py-0.5 rounded text-xs font-bold hover:bg-amber-700">차감</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      document.getElementById('totalMatValue').innerText = fmt(totalVal);
+    }
+
+    function applyMaterialUse(idx) {
+      const list = currentMatSubTab === 'raw' ? rawMaterialData : subMaterialData;
+      const val = Number(document.getElementById('useInput_' + idx).value) || 0;
+      if (val <= 0) return;
+      list[idx].useQty = Number((list[idx].useQty + val).toFixed(3));
+      renderMaterialTable();
+      showToast(`${list[idx].name} ${fmt(val)} 사용 차감되었습니다.`);
+    }
+
+    // 4. 생산 일지 렌더링
+    function renderProduceTable() {
+      const tbody = document.getElementById('produceTableBody');
+      tbody.innerHTML = '';
+      produceData.forEach((row, idx) => {
+        const badge = row.status === '완료'
+          ? '<span class="bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full font-bold">완료</span>'
+          : '<span class="bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full font-bold">지시</span>';
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.innerHTML = `
+          <td class="excel-td text-center font-mono">${row.id}</td>
+          <td class="excel-td text-center">${row.dt}</td>
+          <td class="excel-td text-center">${row.cat}</td>
+          <td class="excel-td text-center font-mono">${row.code}</td>
+          <td class="excel-td font-bold">${row.name}</td>
+          <td class="excel-td text-center">${row.std}</td>
+          <td class="excel-td text-right font-bold">${fmt(row.qty)}</td>
+          <td class="excel-td text-center">${badge}</td>
+          <td class="excel-td">${row.rmk}</td>
+          <td class="excel-td text-center">
+            <button onclick="toggleProduceStatus(${idx})" class="border border-gray-300 bg-white hover:bg-gray-100 px-2 py-1 rounded text-xs font-semibold">상태전환</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function toggleProduceStatus(idx) {
+      produceData[idx].status = produceData[idx].status === '완료' ? '지시' : '완료';
+      produceData[idx].isBase = false;
+      renderProduceTable();
+      showToast(`생산 상태가 [${produceData[idx].status}](으)로 변경되었습니다.`);
+    }
+
+    // 모달 제어
+    function openOrderModal() {
+      const dl = document.getElementById('itemMasterList');
+      dl.innerHTML = '';
+      [...rawMaterialData, ...subMaterialData].forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name;
+        dl.appendChild(opt);
+      });
+      document.getElementById('orderModal').classList.remove('hidden');
+      document.getElementById('orderModal').classList.add('flex');
+    }
+    function closeOrderModal() {
+      document.getElementById('orderModal').classList.add('hidden');
+      document.getElementById('orderModal').classList.remove('flex');
+    }
+    function autoFillOrderItem() {
+      const val = document.getElementById('m_item').value.trim();
+      const found = [...rawMaterialData, ...subMaterialData].find(m => m.name === val);
+      if (found) {
+        document.getElementById('m_vendor').value = found.vendor;
+        document.getElementById('m_price').value = found.price;
+        calcModalPrice();
+      }
+    }
+    function calcModalPrice() {
+      const q = Number(document.getElementById('m_qty').value) || 0;
+      const p = Number(document.getElementById('m_price').value) || 0;
+      const s = q * p;
+      const t = Math.floor(s * 0.1);
+      document.getElementById('m_supply').innerText = fmt(s);
+      document.getElementById('m_tax').innerText = fmt(t);
+      document.getElementById('m_total').innerText = fmt(s + t);
+    }
+    function saveModalOrder() {
+      const q = Number(document.getElementById('m_qty').value) || 0;
+      const p = Number(document.getElementById('m_price').value) || 0;
+      const s = q * p;
+      const t = Math.floor(s * 0.1);
+      orderData.unshift({
+        id: Date.now(),
+        orderDt: document.getElementById('m_orderDt').value,
+        item: document.getElementById('m_item').value,
+        origin: document.getElementById('m_origin').value,
+        exp: document.getElementById('m_exp').value,
+        unit: document.getElementById('m_unit').value,
+        qty: q, price: p, supply: s, tax: t, total: s + t,
+        vendor: document.getElementById('m_vendor').value,
+        inDt: document.getElementById('m_inDt').value,
+        cert: false, billDt: '', payDt: '', isBase: false
+      });
+      closeOrderModal();
+      renderOrderTable();
+      showToast('신규 발주/입고 내역이 등록되었습니다.');
+    }
+
+    function openProduceModal() {
+      const sel = document.getElementById('p_itemSelect');
+      sel.innerHTML = '';
+      productData.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.innerText = `[${p.cat}] ${p.name}`;
+        sel.appendChild(opt);
+      });
+      document.getElementById('produceModal').classList.remove('hidden');
+      document.getElementById('produceModal').classList.add('flex');
+    }
+    function closeProduceModal() {
+      document.getElementById('produceModal').classList.add('hidden');
+      document.getElementById('produceModal').classList.remove('flex');
+    }
+    function saveProduceItem() {
+      const name = document.getElementById('p_itemSelect').value;
+      const prod = productData.find(p => p.name === name);
+      const dt = document.getElementById('p_date').value;
+      const ymd = dt.replace(/-/g, '').slice(2);
+      produceData.unshift({
+        id: 'BA' + ymd + String(produceData.length + 1).padStart(3, '0'),
+        dt: dt,
+        cat: prod ? prod.cat : '제품',
+        code: 'CE' + String(produceData.length + 10).padStart(3, '0'),
+        name: name,
+        std: 'ea',
+        qty: Number(document.getElementById('p_qty').value) || 0,
+        status: document.getElementById('p_status').value,
+        rmk: document.getElementById('p_rmk').value,
+        isBase: false
+      });
+      closeProduceModal();
+      renderProduceTable();
+      showToast('생산 일지가 등록되었습니다.');
+    }
+
+    // 구글 시트 연동 함수
+    function openSheetSyncModal() {
+      document.getElementById('gasUrlInput').value = gasWebAppUrl;
+      document.getElementById('sheetSyncModal').classList.remove('hidden');
+      document.getElementById('sheetSyncModal').classList.add('flex');
+    }
+    function closeSheetSyncModal() {
+      document.getElementById('sheetSyncModal').classList.add('hidden');
+      document.getElementById('sheetSyncModal').classList.remove('flex');
+    }
+    function saveSheetUrl() {
+      gasWebAppUrl = document.getElementById('gasUrlInput').value.trim();
+      localStorage.setItem('cellina_gas_url', gasWebAppUrl);
+      closeSheetSyncModal();
+      showToast('구글 시트 연동 주소가 저장되었습니다.');
+    }
+
+    async function saveAllToGoogleSheet() {
+      if (!gasWebAppUrl) return openSheetSyncModal();
+      showToast('⏳ 구글 시트로 전체 데이터를 저장 중입니다...');
+      try {
+        const payload = {
+          action: 'saveAll',
+          orderData,
+          productData,
+          rawMaterialData,
+          subMaterialData,
+          produceData
+        };
+        await fetch(gasWebAppUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify(payload)
+        });
+        showToast('✅ 구글 스프레드시트에 전체 저장 요청이 완료되었습니다! 시트를 확인해 보세요.');
+      } catch (e) {
+        showToast('⚠️ 저장 중 오류 발생: ' + e.message);
+      }
+    }
+
+    async function loadAllFromGoogleSheet() {
+      if (!gasWebAppUrl) return openSheetSyncModal();
+      showToast('⏳ 구글 시트에서 최신 데이터를 불러오는 중...');
+      try {
+        const res = await fetch(gasWebAppUrl + '?action=loadAll');
+        const json = await res.json();
+        if (json && json.orderData) {
+          orderData = json.orderData;
+          productData = json.productData || productData;
+          rawMaterialData = json.rawMaterialData || rawMaterialData;
+          subMaterialData = json.subMaterialData || subMaterialData;
+          produceData = json.produceData || produceData;
+          renderOrderTable();
+          showToast('✅ 구글 시트에서 최신 데이터를 불러왔습니다!');
+        } else {
+          showToast('ℹ️ 시트에 저장된 데이터가 없습니다. 먼저 [전체 저장]을 눌러주세요.');
+        }
+      } catch (e) {
+        showToast('⚠️ 불러오기 실패: 먼저 시트에 [전체 저장]을 한 번 실행해 주세요.');
+      }
+    }
+
+    // 초기 실행
+    renderOrderTable();
+  </script>
+</body>
+</html>
